@@ -1,5 +1,7 @@
 import type { IpcMain, BrowserWindow } from 'electron'
-import { generatePrompts, applyPersonaFilter, listModels, testConnection } from '../ai/generator'
+import {
+  generatePrompts, applyPersonaFilter, generateClusterPrompts, listModels, testConnection,
+} from '../ai/generator'
 import { getProviderConfig } from '../settings'
 import type { PageContent, PersonaDef, ProviderConfig, ProviderType } from '../../types'
 
@@ -12,7 +14,7 @@ export function registerGenerateHandlers(
       const config = getProviderConfig()
       getWindow()?.webContents.send('generate:progress', { stage: 'prompts' })
       const result = await generatePrompts(pages, category, config)
-      return { success: true, ...result }
+      return { success: true, ...result, warnings: result.warnings ?? [] }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -45,6 +47,48 @@ export function registerGenerateHandlers(
             error:
               warnings[0] ??
               'The model returned no persona prompts. It may have run out of output tokens.',
+          }
+        }
+
+        return { success: true, prompts, warnings }
+      } catch (err) {
+        return {
+          success: false,
+          prompts: [],
+          warnings: [],
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'generate:cluster',
+    async (
+      _,
+      clusterName: string,
+      existingPrompts: Array<{ text: string; cluster: string; trustWord: string }>,
+      category: string,
+      count: number
+    ) => {
+      try {
+        const config = getProviderConfig()
+        const { prompts, warnings } = await generateClusterPrompts(
+          clusterName,
+          existingPrompts,
+          category,
+          count,
+          config
+        )
+
+        if (prompts.length === 0) {
+          return {
+            success: false,
+            prompts: [],
+            warnings,
+            error:
+              `The model returned no new prompts for "${clusterName}". ` +
+              'It may have run out of output tokens, or repeated prompts you already have.',
           }
         }
 

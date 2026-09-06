@@ -5,6 +5,8 @@ import ExportPanel from '../components/ExportPanel'
 import { ALL_PERSONAS, TRUST_WORDS, getPersonaLabel } from '@shared/index'
 import type { Prompt } from '@shared/index'
 
+const CLUSTER_TOP_UP_COUNT = 10
+
 export default function Library(): JSX.Element {
   const {
     prompts, currentSession, setCurrentSession,
@@ -18,6 +20,7 @@ export default function Library(): JSX.Element {
   } = useStore()
 
   const [rerunning, setRerunning] = useState(false)
+  const [toppingUp, setToppingUp] = useState(false)
 
   const clusterNames = useMemo(
     () => Array.from(new Set(prompts.map((p) => p.cluster))),
@@ -127,6 +130,52 @@ export default function Library(): JSX.Element {
     }
   }
 
+  async function handleGenerateInCluster(): Promise<void> {
+    if (!currentSession || !filterCluster) return
+    setToppingUp(true)
+    setError(null)
+    setWarnings([])
+
+    try {
+      // Deleted prompts are included so the model is not asked to reinvent
+      // something the user has already thrown away.
+      const existing = prompts.map(({ text, cluster, trustWord }) => ({
+        text,
+        cluster,
+        trustWord,
+      }))
+
+      const result = await window.api.generate.cluster(
+        filterCluster,
+        existing,
+        currentSession.category,
+        CLUSTER_TOP_UP_COUNT
+      )
+
+      if (!result.success) {
+        setError(result.error ?? 'Cluster generation failed')
+        setWarnings(result.warnings ?? [])
+        return
+      }
+
+      setWarnings(result.warnings ?? [])
+
+      const appended = await window.api.db.appendPrompts(currentSession.id, result.prompts)
+      if (!appended.success) {
+        setError(appended.error ?? 'Failed to save the new prompts')
+        return
+      }
+
+      const updated = await window.api.db.load(currentSession.id)
+      if (updated) {
+        setCurrentSession(updated)
+        setPrompts(updated.prompts)
+      }
+    } finally {
+      setToppingUp(false)
+    }
+  }
+
   if (prompts.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -175,6 +224,18 @@ export default function Library(): JSX.Element {
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+
+        {filterCluster && (
+          <button
+            onClick={handleGenerateInCluster}
+            disabled={toppingUp}
+            className="text-xs px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+          >
+            {toppingUp
+              ? 'Generating…'
+              : `Generate ${CLUSTER_TOP_UP_COUNT} more in this cluster`}
+          </button>
+        )}
 
         {personasInLibrary.length > 0 && (
           <select value={filterPersona} onChange={(e) => setFilterPersona(e.target.value)} className={selectClass}>

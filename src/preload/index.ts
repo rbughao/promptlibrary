@@ -32,6 +32,18 @@ const api = {
       warnings: string[]
       error?: string
     }> => ipcRenderer.invoke('generate:persona', basePrompts, personas, category),
+    cluster: (
+      clusterName: string,
+      existingPrompts: Array<{ text: string; cluster: string; trustWord: string }>,
+      category: string,
+      count: number
+    ): Promise<{
+      success: boolean
+      prompts: NewPrompt[]
+      warnings: string[]
+      error?: string
+    }> =>
+      ipcRenderer.invoke('generate:cluster', clusterName, existingPrompts, category, count),
     listModels: (cfg: { type: ProviderType; apiKey: string; baseUrl: string }) =>
       ipcRenderer.invoke('generate:listModels', cfg),
     testConnection: (config: ProviderConfig) =>

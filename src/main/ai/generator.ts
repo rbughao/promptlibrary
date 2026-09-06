@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { extractRawTerms } from '../nlp/extractor'
 import type {
-  PageContent, Cluster, GenerateResult, GenerateProgress,
+  PageContent, Cluster, GenerateResult, GenerateProgress, ClusterGenerateResult,
   PersonaDef, ProviderConfig, ProviderType,
 } from '../../types'
 import { TRUST_WORDS, PROVIDER_DEFAULT_URLS, PROVIDER_MODELS } from '../../types'
@@ -246,6 +246,13 @@ Requirements:
     }))
   }
 
+  // Deduplicate before deciding how many more to ask for, so the follow-up call
+  // tops the library up to a genuine 50 rather than 50-including-copies.
+  const seen = new Set<string>()
+  const firstPass = dedupePrompts(prompts, seen)
+  prompts = firstPass.prompts
+  let duplicates = firstPass.removed
+
   if (prompts.length < 50) {
     const extra = 50 - prompts.length
     const clusterNames = clusters.map((c) => c.name).join(', ')
@@ -258,13 +265,31 @@ Requirements:
         `Return only: { "prompts": [{ "text": "...", "cluster": "...", "trustWord": "..." }] }`,
         4096
       )
-      prompts = [...prompts, ...recoverPrompts(followText, clusters[0]?.name ?? 'General')]
+      // The follow-up call is the main source of near-copies — it is asked for
+      // "more of the same" and frequently obliges too literally.
+      const follow = dedupePrompts(
+        recoverPrompts(followText, clusters[0]?.name ?? 'General'),
+        seen
+      )
+      duplicates += follow.removed
+      prompts = [...prompts, ...follow.prompts]
     } catch {
       // best effort — the first batch already gave us a usable library
     }
   }
 
-  return { clusters, prompts }
+  const normalised = applyTrustWords(prompts)
+  prompts = normalised.prompts
+
+  const warnings: string[] = []
+  if (duplicates > 0) {
+    warnings.push(`Removed ${plural(duplicates, 'duplicate prompt')}.`)
+  }
+  if (normalised.missing > 0) {
+    warnings.push(`No trust word was found in ${plural(normalised.missing, 'prompt')}.`)
+  }
+
+  return { clusters, prompts, warnings }
 }
 
 /**
@@ -329,6 +354,9 @@ export async function applyPersonaFilter(
       queue.push({ items: basePrompts.slice(i, i + PERSONA_BATCH_SIZE), retried: false })
     }
 
+    // Collected per persona: two personas rewriting the same base prompt into
+    // the same sentence are distinct rows, so dedup is scoped to one persona.
+    const personaPrompts: GenerateResult['prompts'] = []
     let produced = 0
     let dropped = 0
     let done = 0
@@ -364,7 +392,7 @@ export async function applyPersonaFilter(
         }
         dropped += batch.items.length
       } else {
-        results.push(
+        personaPrompts.push(
           ...rewritten.map((p) => ({
             ...p,
             persona: persona.id,
@@ -377,6 +405,10 @@ export async function applyPersonaFilter(
       done++
     }
 
+    const deduped = dedupePrompts(personaPrompts)
+    const normalised = applyTrustWords(deduped.prompts)
+    results.push(...normalised.prompts)
+
     if (produced === 0) {
       warnings.push(
         `${persona.label}: no prompts were generated${lastError ? ` — ${lastError}` : '.'}`
@@ -386,9 +418,148 @@ export async function applyPersonaFilter(
         `${persona.label}: ${dropped} of ${basePrompts.length} prompts could not be rewritten.`
       )
     }
+    if (deduped.removed > 0) {
+      warnings.push(`${persona.label}: removed ${plural(deduped.removed, 'duplicate prompt')}.`)
+    }
+    if (normalised.missing > 0) {
+      warnings.push(
+        `${persona.label}: no trust word was found in ${plural(normalised.missing, 'prompt')}.`
+      )
+    }
   }
 
   return { prompts: results, warnings }
+}
+
+// ── Per-cluster top-up ───────────────────────────────────────────────────────
+
+/**
+ * Generate `count` additional prompts for one cluster, so a thin cluster can be
+ * strengthened without regenerating the whole library.
+ */
+export async function generateClusterPrompts(
+  clusterName: string,
+  existingPrompts: RawPrompt[],
+  category: string,
+  count: number,
+  config: ProviderConfig
+): Promise<ClusterGenerateResult> {
+  const system =
+    'You are an AI search optimization specialist. Generate realistic customer ' +
+    'questions for one specific topic cluster. Return ONLY valid JSON.'
+
+  // Only this cluster's prompts are listed: the full library would crowd out the
+  // instructions on smaller models, and cross-cluster repeats are not the risk here.
+  const inCluster = existingPrompts.filter((p) => p.cluster === clusterName)
+  const avoid = inCluster.length
+    ? `Do not repeat or paraphrase any of these existing prompts:\n${inCluster.map((p) => `- ${p.text}`).join('\n')}\n\n`
+    : ''
+
+  const user = `Industry: ${category}
+Topic cluster: ${clusterName}
+
+Generate ${count} new customer questions that belong in this cluster only.
+Each must sound like a natural customer question and must contain at least one of these trust words: ${TRUST_WORDS.join(', ')}
+Vary the question styles: comparisons, recommendations, "where to find", how-to.
+
+${avoid}Return ONLY this JSON, containing exactly ${count} entries:
+{ "prompts": [{ "text": "...", "cluster": "${clusterName}", "trustWord": "..." }] }`
+
+  const text = await callLLM(config, system, user, Math.max(1024, count * 120))
+
+  // The cluster is fixed by the caller — a model that renames or invents one
+  // would otherwise scatter the new prompts across the library.
+  const recovered = recoverPrompts(text, clusterName).map((p) => ({ ...p, cluster: clusterName }))
+
+  const seen = new Set(existingPrompts.map((p) => dedupeKey(p.text)))
+  const deduped = dedupePrompts(recovered, seen)
+  const normalised = applyTrustWords(deduped.prompts)
+
+  const warnings: string[] = []
+  if (deduped.removed > 0) {
+    warnings.push(`${clusterName}: removed ${plural(deduped.removed, 'duplicate prompt')}.`)
+  }
+  if (normalised.missing > 0) {
+    warnings.push(
+      `${clusterName}: no trust word was found in ${plural(normalised.missing, 'prompt')}.`
+    )
+  }
+
+  return { prompts: normalised.prompts, warnings }
+}
+
+// ── Generation quality: trust words and duplicates ───────────────────────────
+
+/**
+ * Longest first, so a sentence containing both "most affordable" and a shorter
+ * entry resolves to the multi-word one rather than whichever came first in
+ * TRUST_WORDS.
+ */
+const TRUST_WORDS_BY_LENGTH = [...TRUST_WORDS].sort((a, b) => b.length - a.length)
+
+/** Boundaries are alphanumeric-only so hyphenated entries ("top-rated") match. */
+function containsTrustWord(text: string, word: string): boolean {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(text)
+}
+
+/** The canonical trust word actually present in the text, or '' if there is none. */
+function resolveTrustWord(text: string): string {
+  return TRUST_WORDS_BY_LENGTH.find((w) => containsTrustWord(text, w)) ?? ''
+}
+
+/**
+ * Models regularly report a `trustWord` that is absent from the text, or invent
+ * one that is not a trust word at all — which then pollutes the Library filter.
+ * The text is what the user actually publishes, so it wins over the field.
+ * Prompts with no trust word are kept and counted rather than dropped.
+ */
+function applyTrustWords<T extends RawPrompt>(items: T[]): { prompts: T[]; missing: number } {
+  let missing = 0
+  const prompts = items.map((p): T => {
+    const trustWord = resolveTrustWord(p.text)
+    if (!trustWord) missing++
+    return { ...p, trustWord }
+  })
+  return { prompts, missing }
+}
+
+/** Case, punctuation and spacing differences do not make a prompt distinct. */
+function dedupeKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Drop later duplicates, keeping the first occurrence. `seen` can be primed with
+ * keys the caller already holds, so a follow-up batch is deduplicated against
+ * the batch before it.
+ */
+function dedupePrompts<T extends { text: string }>(
+  items: T[],
+  seen: Set<string> = new Set()
+): { prompts: T[]; removed: number } {
+  const prompts: T[] = []
+  let removed = 0
+
+  for (const item of items) {
+    const key = dedupeKey(item.text)
+    if (seen.has(key)) {
+      removed++
+      continue
+    }
+    seen.add(key)
+    prompts.push(item)
+  }
+
+  return { prompts, removed }
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
 // ── Response parsing ─────────────────────────────────────────────────────────
