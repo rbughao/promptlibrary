@@ -124,7 +124,13 @@ export default function PromptRow({ prompt, clusterColor }: Props): JSX.Element 
 
       {/* Trust word */}
       <td className="px-3 py-2.5 w-28 text-center">
-        <span className="text-xs text-amber-400 font-medium">{prompt.trustWord}</span>
+        {prompt.trustWord ? (
+          <span className="text-xs text-amber-400 font-medium">{prompt.trustWord}</span>
+        ) : (
+          <span className="text-xs text-slate-700" title="No trust word found in this prompt">
+            —
+          </span>
+        )}
       </td>
 
       {/* Persona */}

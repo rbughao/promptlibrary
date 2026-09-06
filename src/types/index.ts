@@ -78,6 +78,7 @@ export interface GenerateResult {
     persona?: string
     personaLabel?: string
   }>
+  warnings?: string[]
 }
 
 export interface SessionWithPrompts extends Session {
@@ -284,3 +285,12 @@ export const TRUST_WORDS = [
   'best', 'trusted', 'recommended', 'reliable', 'top-rated',
   'leading', 'safest', 'most affordable', 'most reputable',
 ]
+
+// ── Generation quality (phase 6) ──
+
+/** Result of topping up a single cluster with additional prompts. */
+export interface ClusterGenerateResult {
+  prompts: GenerateResult['prompts']
+  /** Non-fatal notes worth showing the user (duplicates or missing trust words). */
+  warnings: string[]
+}
