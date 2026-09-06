@@ -1,12 +1,16 @@
-import type { IpcMain } from 'electron'
+import type { IpcMain, BrowserWindow } from 'electron'
 import { generatePrompts, applyPersonaFilter, listModels, testConnection } from '../ai/generator'
 import { getProviderConfig } from '../settings'
 import type { PageContent, PersonaDef, ProviderConfig, ProviderType } from '../../types'
 
-export function registerGenerateHandlers(ipcMain: IpcMain): void {
+export function registerGenerateHandlers(
+  ipcMain: IpcMain,
+  getWindow: () => BrowserWindow | null
+): void {
   ipcMain.handle('generate:prompts', async (_, pages: PageContent[], category: string) => {
     try {
       const config = getProviderConfig()
+      getWindow()?.webContents.send('generate:progress', { stage: 'prompts' })
       const result = await generatePrompts(pages, category, config)
       return { success: true, ...result }
     } catch (err) {
@@ -24,10 +28,34 @@ export function registerGenerateHandlers(ipcMain: IpcMain): void {
     ) => {
       try {
         const config = getProviderConfig()
-        const prompts = await applyPersonaFilter(basePrompts, personas, category, config)
-        return { success: true, prompts }
+        const { prompts, warnings } = await applyPersonaFilter(
+          basePrompts,
+          personas,
+          category,
+          config,
+          (progress) => getWindow()?.webContents.send('generate:progress', progress)
+        )
+
+        // Every persona failing is a real failure, not a warning.
+        if (prompts.length === 0) {
+          return {
+            success: false,
+            prompts: [],
+            warnings,
+            error:
+              warnings[0] ??
+              'The model returned no persona prompts. It may have run out of output tokens.',
+          }
+        }
+
+        return { success: true, prompts, warnings }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return {
+          success: false,
+          prompts: [],
+          warnings: [],
+          error: err instanceof Error ? err.message : String(err),
+        }
       }
     }
   )

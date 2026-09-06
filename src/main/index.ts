@@ -68,7 +68,7 @@ app.whenReady().then(() => {
   loadSettings()
 
   registerCrawlHandlers(ipcMain, () => mainWindow)
-  registerGenerateHandlers(ipcMain)
+  registerGenerateHandlers(ipcMain, () => mainWindow)
   registerDbHandlers(ipcMain)
   registerSettingsHandlers()
 

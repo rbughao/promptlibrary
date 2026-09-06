@@ -14,9 +14,10 @@ export default function Setup(): JSX.Element {
     setCrawledPages,
     generating, setGenerating,
     generatingPersona, setGeneratingPersona,
+    setGenerateProgress,
     setPrompts, setClusters, setCurrentSession,
     providerConfig, setShowSettings,
-    setPage, setError, error,
+    setPage, setError, error, setWarnings,
   } = useStore()
 
   const [customPersonas, setCustomPersonas] = useState<PersonaDef[]>([])
@@ -31,6 +32,13 @@ export default function Setup(): JSX.Element {
     })
     return unsub
   }, [setCrawlProgress])
+
+  useEffect(() => {
+    const unsub = window.api.on.generateProgress((progress) => {
+      setGenerateProgress(progress)
+    })
+    return unsub
+  }, [setGenerateProgress])
 
   const effectiveCategory = isCustomCategory ? customCategory || category : category
   const personaList: PersonaDef[] = INDUSTRY_PERSONAS[effectiveCategory] ?? []
@@ -47,7 +55,9 @@ export default function Setup(): JSX.Element {
     }
 
     setError(null)
+    setWarnings([])
     setCrawlProgress(null)
+    setGenerateProgress(null)
     setCrawledPages([])
     setCrawling(true)
 
@@ -95,6 +105,15 @@ export default function Setup(): JSX.Element {
 
       if (personaResult.success) {
         allPrompts = [...allPrompts, ...(personaResult.prompts ?? [])]
+        // Some personas may still have failed — keep the library, report them.
+        setWarnings(personaResult.warnings ?? [])
+      } else {
+        // The base library is still good, so save it and surface the problem
+        // rather than discarding a successful crawl and generation.
+        setWarnings([
+          personaResult.error ?? 'Persona generation failed.',
+          ...(personaResult.warnings ?? []),
+        ])
       }
       setGeneratingPersona(false)
     } else {

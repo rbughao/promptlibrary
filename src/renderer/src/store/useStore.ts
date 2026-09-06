@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   Cluster, Prompt, Session, SessionWithPrompts,
-  CrawlProgress, PageContent, ProviderConfig,
+  CrawlProgress, GenerateProgress, PageContent, ProviderConfig,
 } from '@shared/index'
 
 export type AppPage = 'setup' | 'library' | 'history'
@@ -41,6 +41,8 @@ interface AppState {
   setGenerating: (v: boolean) => void
   generatingPersona: boolean
   setGeneratingPersona: (v: boolean) => void
+  generateProgress: GenerateProgress | null
+  setGenerateProgress: (p: GenerateProgress | null) => void
 
   // Current session
   currentSession: SessionWithPrompts | null
@@ -71,6 +73,9 @@ interface AppState {
   // Error
   error: string | null
   setError: (e: string | null) => void
+  /** Non-fatal problems from the last generation (e.g. one persona failed). */
+  warnings: string[]
+  setWarnings: (w: string[]) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -108,6 +113,8 @@ export const useStore = create<AppState>((set) => ({
   setGenerating: (generating) => set({ generating }),
   generatingPersona: false,
   setGeneratingPersona: (generatingPersona) => set({ generatingPersona }),
+  generateProgress: null,
+  setGenerateProgress: (generateProgress) => set({ generateProgress }),
 
   currentSession: null,
   setCurrentSession: (currentSession) => set({ currentSession }),
@@ -137,4 +144,6 @@ export const useStore = create<AppState>((set) => ({
 
   error: null,
   setError: (error) => set({ error }),
+  warnings: [],
+  setWarnings: (warnings) => set({ warnings }),
 }))

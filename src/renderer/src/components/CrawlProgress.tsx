@@ -5,7 +5,8 @@ interface Props {
 }
 
 export default function CrawlProgress({ onCancel }: Props): JSX.Element {
-  const { crawlProgress, crawledPages, generating, generatingPersona } = useStore()
+  const { crawlProgress, crawledPages, generating, generatingPersona, generateProgress } =
+    useStore()
 
   const pagesVisited = crawlProgress?.pagesVisited ?? 0
   const maxPages = 25
@@ -13,6 +14,25 @@ export default function CrawlProgress({ onCancel }: Props): JSX.Element {
 
   const isError = crawlProgress?.status === 'error'
   const isDone = crawlProgress?.status === 'complete'
+
+  // Persona rewriting runs one batch at a time across every selected persona,
+  // so we can show real progress instead of an indeterminate pulse.
+  const gp = generateProgress
+  const personaDetail =
+    generatingPersona && gp?.stage === 'persona' && gp.personaTotal && gp.batchTotal
+      ? {
+          label: gp.personaLabel ?? 'Persona',
+          personaIndex: gp.personaIndex ?? 1,
+          personaTotal: gp.personaTotal,
+          batchIndex: gp.batchIndex ?? 1,
+          batchTotal: gp.batchTotal,
+          percent: Math.round(
+            (((gp.personaIndex ?? 1) - 1 + (gp.batchIndex ?? 1) / gp.batchTotal) /
+              gp.personaTotal) *
+              100
+          ),
+        }
+      : null
 
   let statusLabel = 'Crawling website…'
   if (generating) statusLabel = 'Generating prompt library…'
@@ -53,9 +73,27 @@ export default function CrawlProgress({ onCancel }: Props): JSX.Element {
 
       {(generating || generatingPersona) && (
         <div className="mb-4">
-          <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
-            <div className="h-1.5 bg-indigo-500 rounded-full animate-pulse w-full" />
-          </div>
+          {personaDetail ? (
+            <>
+              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <span>{personaDetail.label}</span>
+                <span>
+                  persona {personaDetail.personaIndex} of {personaDetail.personaTotal}
+                  {' · '}batch {personaDetail.batchIndex}/{personaDetail.batchTotal}
+                </span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-1.5">
+                <div
+                  className="h-1.5 bg-indigo-500 rounded-full transition-all duration-300"
+                  style={{ width: `${personaDetail.percent}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+              <div className="h-1.5 bg-indigo-500 rounded-full animate-pulse w-full" />
+            </div>
+          )}
         </div>
       )}
 

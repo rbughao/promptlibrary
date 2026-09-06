@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   PageContent, Cluster, Session, SessionWithPrompts,
-  PersonaDef, CrawlProgress, ProviderConfig, ProviderType,
+  PersonaDef, CrawlProgress, GenerateProgress, ProviderConfig, ProviderType,
 } from '../types'
 
 type CrawlProgressCallback = (progress: CrawlProgress) => void
@@ -26,7 +26,12 @@ const api = {
       basePrompts: Array<{ text: string; cluster: string; trustWord: string }>,
       personas: PersonaDef[],
       category: string
-    ) => ipcRenderer.invoke('generate:persona', basePrompts, personas, category),
+    ): Promise<{
+      success: boolean
+      prompts: NewPrompt[]
+      warnings: string[]
+      error?: string
+    }> => ipcRenderer.invoke('generate:persona', basePrompts, personas, category),
     listModels: (cfg: { type: ProviderType; apiKey: string; baseUrl: string }) =>
       ipcRenderer.invoke('generate:listModels', cfg),
     testConnection: (config: ProviderConfig) =>
@@ -64,6 +69,13 @@ const api = {
       // callback must return void.
       return () => {
         ipcRenderer.removeListener('crawl:progress', handler)
+      }
+    },
+    generateProgress: (cb: (progress: GenerateProgress) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, progress: GenerateProgress) => cb(progress)
+      ipcRenderer.on('generate:progress', handler)
+      return () => {
+        ipcRenderer.removeListener('generate:progress', handler)
       }
     },
   },

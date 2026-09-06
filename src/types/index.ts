@@ -56,6 +56,17 @@ export interface CrawlProgress {
   error?: string
 }
 
+export interface GenerateProgress {
+  stage: 'prompts' | 'persona'
+  /** Persona currently being rewritten, when stage is 'persona'. */
+  personaLabel?: string
+  personaIndex?: number
+  personaTotal?: number
+  /** Batch within the current persona. Totals grow if a batch is split retried. */
+  batchIndex?: number
+  batchTotal?: number
+}
+
 export interface GenerateResult {
   clusters: Cluster[]
   prompts: Array<{

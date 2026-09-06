@@ -14,7 +14,7 @@ export default function Library(): JSX.Element {
     filterTrustWord, setFilterTrustWord,
     showDeleted, setShowDeleted,
     selectedPersonas, setGeneratingPersona,
-    setPrompts, error, setError,
+    setPrompts, error, setError, warnings, setWarnings,
   } = useStore()
 
   const [rerunning, setRerunning] = useState(false)
@@ -71,6 +71,7 @@ export default function Library(): JSX.Element {
     setRerunning(true)
     setGeneratingPersona(true)
     setError(null)
+    setWarnings([])
 
     try {
       // Skip personas already present — re-running one would duplicate every prompt.
@@ -96,6 +97,7 @@ export default function Library(): JSX.Element {
 
       if (!result.success) {
         setError(result.error ?? 'Persona generation failed')
+        setWarnings(result.warnings ?? [])
         return
       }
 
@@ -104,6 +106,9 @@ export default function Library(): JSX.Element {
         setError('The model returned no persona prompts — it may have run out of output tokens.')
         return
       }
+
+      // Partial success: some personas or batches may still have failed.
+      setWarnings(result.warnings ?? [])
 
       const appended = await window.api.db.appendPrompts(currentSession.id, newPrompts)
       if (!appended.success) {
@@ -216,6 +221,23 @@ export default function Library(): JSX.Element {
             onClick={() => setError(null)}
             className="shrink-0 text-red-600 hover:text-red-300 transition-colors leading-none"
             aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="shrink-0 flex items-start gap-2 px-4 py-2.5 bg-amber-900/20 border-b border-amber-800/60 text-sm text-amber-400">
+          <div className="flex-1 space-y-0.5">
+            {warnings.map((w, i) => (
+              <p key={i}>{w}</p>
+            ))}
+          </div>
+          <button
+            onClick={() => setWarnings([])}
+            className="shrink-0 text-amber-600 hover:text-amber-300 transition-colors leading-none"
+            aria-label="Dismiss warnings"
           >
             ×
           </button>
