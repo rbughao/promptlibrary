@@ -9,7 +9,7 @@ export default function CrawlProgress({ onCancel }: Props): JSX.Element {
     useStore()
 
   const pagesVisited = crawlProgress?.pagesVisited ?? 0
-  const maxPages = 25
+  const maxPages = crawlProgress?.maxPages ?? 25
   const progress = Math.min((pagesVisited / maxPages) * 100, 100)
 
   const isError = crawlProgress?.status === 'error'

@@ -53,6 +53,8 @@ export interface CrawlProgress {
   pagesVisited: number
   currentUrl: string
   status: 'crawling' | 'complete' | 'error'
+  /** Page budget for this crawl, so the UI need not hardcode it. */
+  maxPages?: number
   error?: string
 }
 

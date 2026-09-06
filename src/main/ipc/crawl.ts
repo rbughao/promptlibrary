@@ -2,26 +2,33 @@ import type { IpcMain, BrowserWindow } from 'electron'
 import { crawlSite } from '../crawler'
 import type { PageContent } from '../../types'
 
-const activeCrawls = new Map<string, AbortController>()
+const MAX_DEPTH = 3
+const MAX_PAGES = 25
+
+// The UI runs one crawl at a time. Keying this by URL meant an edit to the URL
+// field mid-crawl made Cancel unable to find the controller.
+let active: AbortController | null = null
 
 export function registerCrawlHandlers(
   ipcMain: IpcMain,
   getWindow: () => BrowserWindow | null
 ): void {
   ipcMain.handle('crawl:start', async (_, url: string) => {
+    active?.abort()
     const controller = new AbortController()
-    activeCrawls.set(url, controller)
+    active = controller
 
     try {
       const pages: PageContent[] = await crawlSite({
         url,
-        maxDepth: 3,
-        maxPages: 25,
+        maxDepth: MAX_DEPTH,
+        maxPages: MAX_PAGES,
         signal: controller.signal,
-        onProgress: ({ pagesVisited, currentUrl }) => {
+        onProgress: ({ pagesVisited, currentUrl, maxPages }) => {
           getWindow()?.webContents.send('crawl:progress', {
             pagesVisited,
             currentUrl,
+            maxPages,
             status: 'crawling',
           })
         },
@@ -30,8 +37,18 @@ export function registerCrawlHandlers(
       getWindow()?.webContents.send('crawl:progress', {
         pagesVisited: pages.length,
         currentUrl: '',
+        maxPages: MAX_PAGES,
         status: 'complete',
       })
+
+      if (pages.length === 0) {
+        return {
+          success: false,
+          error:
+            'No pages could be read from that URL. Check the address is reachable ' +
+            'and serves HTML.',
+        }
+      }
 
       return { success: true, pages }
     } catch (err) {
@@ -39,18 +56,19 @@ export function registerCrawlHandlers(
       getWindow()?.webContents.send('crawl:progress', {
         pagesVisited: 0,
         currentUrl: '',
+        maxPages: MAX_PAGES,
         status: 'error',
         error: message,
       })
       return { success: false, error: message }
     } finally {
-      activeCrawls.delete(url)
+      if (active === controller) active = null
     }
   })
 
-  ipcMain.handle('crawl:cancel', async (_, url: string) => {
-    activeCrawls.get(url)?.abort()
-    activeCrawls.delete(url)
+  ipcMain.handle('crawl:cancel', async () => {
+    active?.abort()
+    active = null
     return { success: true }
   })
 }

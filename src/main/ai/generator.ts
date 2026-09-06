@@ -126,6 +126,46 @@ Rules:
 5. Group prompts into 4–8 meaningful topic clusters
 6. Return ONLY valid JSON — no markdown, no explanation`
 
+/**
+ * Roughly 3–4k tokens of page context. A hard `slice(0, 12)` used to discard
+ * half of a 25-page crawl regardless of how small those pages were; budgeting
+ * by size instead means small sites contribute every page, and only genuinely
+ * large ones get truncated — and because pages arrive in breadth-first order,
+ * what gets dropped is the deepest, least representative material.
+ */
+const PAGE_SUMMARY_BUDGET = 12_000
+
+interface PageSummary {
+  url: string
+  title: string
+  meta: string
+  headings: string[]
+}
+
+function buildPagesSummary(pages: PageContent[]): PageSummary[] {
+  const out: PageSummary[] = []
+  let used = 0
+
+  for (const p of pages) {
+    const entry: PageSummary = {
+      url: p.url,
+      title: p.title.slice(0, 160),
+      meta: p.metaDescription.slice(0, 240),
+      headings: [...p.h1s, ...p.h2s.slice(0, 5), ...p.h3s.slice(0, 4)]
+        .slice(0, 10)
+        .map((h) => h.slice(0, 120)),
+    }
+
+    const size = JSON.stringify(entry).length
+    if (out.length > 0 && used + size > PAGE_SUMMARY_BUDGET) break
+
+    out.push(entry)
+    used += size
+  }
+
+  return out
+}
+
 export async function generatePrompts(
   pages: PageContent[],
   category: string,
@@ -133,12 +173,7 @@ export async function generatePrompts(
 ): Promise<GenerateResult> {
   const terms = extractRawTerms(pages)
 
-  const pagesSummary = pages.slice(0, 12).map((p) => ({
-    url: p.url,
-    title: p.title,
-    meta: p.metaDescription,
-    headings: [...p.h1s, ...p.h2s.slice(0, 4), ...p.h3s.slice(0, 4)],
-  }))
+  const pagesSummary = buildPagesSummary(pages)
 
   const userPrompt = `Website industry: ${category}
 
