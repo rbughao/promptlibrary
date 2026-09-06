@@ -78,7 +78,15 @@ export default function History(): JSX.Element {
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 truncate">{session.url}</p>
-                <p className="text-xs text-slate-600 mt-1">{formatDate(session.createdAt)}</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  {formatDate(session.createdAt)}
+                  {session.pageCount > 0 && (
+                    <>
+                      <span className="mx-1.5 text-slate-700">·</span>
+                      {session.pageCount} pages crawled
+                    </>
+                  )}
+                </p>
               </div>
 
               <div className="shrink-0 text-right">

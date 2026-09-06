@@ -23,10 +23,33 @@ function persist(): void {
   writeFileSync(storePath, JSON.stringify(store), 'utf-8')
 }
 
+type NewPrompt = {
+  text: string
+  cluster: string
+  trustWord: string
+  persona?: string
+  personaLabel?: string
+}
+
+function toRecord(sessionId: string, p: NewPrompt): Prompt {
+  return {
+    id: randomUUID(),
+    sessionId,
+    text: p.text,
+    cluster: p.cluster,
+    trustWord: p.trustWord,
+    persona: p.persona,
+    personaLabel: p.personaLabel,
+    tags: [],
+    edited: false,
+    deleted: false,
+  }
+}
+
 export function saveSession(
-  sessionData: { url: string; category: string },
+  sessionData: { url: string; category: string; pageCount?: number },
   clusters: Cluster[],
-  prompts: Array<{ text: string; cluster: string; trustWord: string; persona?: string }>
+  prompts: NewPrompt[]
 ): { sessionId: string } {
   const sessionId = randomUUID()
 
@@ -35,7 +58,7 @@ export function saveSession(
     url: sessionData.url,
     category: sessionData.category,
     createdAt: Date.now(),
-    pageCount: 0,
+    pageCount: sessionData.pageCount ?? 0,
     promptCount: prompts.length,
   }
 
@@ -46,21 +69,32 @@ export function saveSession(
   }
 
   for (const p of prompts) {
-    store.prompts.push({
-      id: randomUUID(),
-      sessionId,
-      text: p.text,
-      cluster: p.cluster,
-      trustWord: p.trustWord,
-      persona: p.persona,
-      tags: [],
-      edited: false,
-      deleted: false,
-    })
+    store.prompts.push(toRecord(sessionId, p))
   }
 
   persist()
   return { sessionId }
+}
+
+/**
+ * Add prompts to an existing session. Used when personas are applied after the
+ * initial generation — saveSession would mint a new session id and orphan them.
+ */
+export function appendPrompts(
+  sessionId: string,
+  prompts: NewPrompt[]
+): { success: boolean; added: number } {
+  const session = store.sessions.find((s) => s.id === sessionId)
+  if (!session) return { success: false, added: 0 }
+
+  for (const p of prompts) {
+    store.prompts.push(toRecord(sessionId, p))
+  }
+
+  session.promptCount = store.prompts.filter((p) => p.sessionId === sessionId).length
+
+  persist()
+  return { success: true, added: prompts.length }
 }
 
 export function loadSession(sessionId: string): SessionWithPrompts | null {

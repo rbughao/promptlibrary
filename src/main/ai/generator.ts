@@ -165,8 +165,8 @@ Requirements:
   const text = await callLLM(config, SYSTEM_PROMPT, userPrompt)
   const parsed = parseJsonResponse(text)
 
-  const clusters: Cluster[] = parsed.clusters ?? []
-  let prompts: GenerateResult['prompts'] = parsed.prompts ?? []
+  const clusters = (parsed.clusters as Cluster[] | undefined) ?? []
+  let prompts = (parsed.prompts as GenerateResult['prompts'] | undefined) ?? []
 
   if (prompts.length < 50) {
     const extra = 50 - prompts.length
@@ -216,7 +216,7 @@ Return ONLY: { "prompts": [{ "text": "...", "cluster": "...", "trustWord": "..."
       if (Array.isArray(parsed.prompts)) {
         results.push(
           ...(parsed.prompts as Array<{ text: string; cluster: string; trustWord: string }>).map(
-            (p) => ({ ...p, persona: persona.id })
+            (p) => ({ ...p, persona: persona.id, personaLabel: persona.label })
           )
         )
       }

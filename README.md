@@ -20,7 +20,7 @@ Built for marketers and businesses who want to understand how potential customer
 - **Custom Personas** — Add your own persona with a label and the AI adapts all prompts to that audience
 - **Multi-Provider LLM Support** — Anthropic (Claude), OpenAI, Google Gemini, Ollama, LM Studio, or any OpenAI-compatible endpoint
 - **Prompt Library** — Sortable/filterable table with inline editing, tagging, and soft-delete
-- **Session History** — All sessions persisted in SQLite; reload any past library instantly
+- **Session History** — All sessions persisted locally on disk; reload any past library instantly
 - **Export** — CSV, JSON, plain text, or copy all to clipboard
 
 ---
@@ -37,7 +37,7 @@ Built for marketers and businesses who want to understand how potential customer
 | Web crawling | Cheerio + undici |
 | NLP | compromise.js |
 | AI | Anthropic SDK + OpenAI SDK |
-| Storage | better-sqlite3 (SQLite) |
+| Storage | JSON document store in Electron `userData` |
 
 ---
 
@@ -109,7 +109,7 @@ src/
 │   ├── crawler/              # BFS crawler + Cheerio parser
 │   ├── nlp/                  # compromise.js term extractor
 │   ├── ai/                   # LLM generator (prompts + persona filter)
-│   └── db/                   # SQLite schema + queries
+│   └── db/                   # Local JSON store (sessions, clusters, prompts)
 ├── preload/
 │   └── index.ts              # contextBridge API bridge
 └── renderer/src/

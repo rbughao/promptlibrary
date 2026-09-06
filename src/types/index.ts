@@ -26,6 +26,9 @@ export interface Prompt {
   cluster: string
   trustWord: string
   persona?: string
+  /** Display label captured at generation time. Custom personas are not in
+   *  INDUSTRY_PERSONAS, so their label cannot be recovered from the id alone. */
+  personaLabel?: string
   tags: string[]
   edited: boolean
   deleted: boolean
@@ -60,6 +63,7 @@ export interface GenerateResult {
     cluster: string
     trustWord: string
     persona?: string
+    personaLabel?: string
   }>
 }
 
@@ -246,6 +250,21 @@ export const INDUSTRY_PERSONAS: Record<string, PersonaDef[]> = {
     { id: 'edu-corp', label: 'Corporate Learner', description: 'employee training, team workshops, and leadership development' },
     { id: 'edu-lifelong', label: 'Lifelong Learner', description: 'hobby courses, personal enrichment, and cultural education' },
   ],
+}
+
+/** Every built-in persona, flattened across industries. */
+export const ALL_PERSONAS: PersonaDef[] = Object.values(INDUSTRY_PERSONAS).flat()
+
+const PERSONA_BY_ID = new Map(ALL_PERSONAS.map((p) => [p.id, p]))
+
+/**
+ * Resolve a persona id to a human-readable label.
+ * Prefers `storedLabel` (captured at generation time) so custom personas —
+ * which never appear in INDUSTRY_PERSONAS — still render correctly.
+ */
+export function getPersonaLabel(id: string, storedLabel?: string): string {
+  if (storedLabel) return storedLabel
+  return PERSONA_BY_ID.get(id)?.label ?? id
 }
 
 export const TRUST_WORDS = [

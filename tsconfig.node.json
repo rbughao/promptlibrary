@@ -8,6 +8,8 @@
   ],
   "compilerOptions": {
     "composite": true,
+    // Vite plugins ship ESM-only type declarations (.d.mts)
+    "moduleResolution": "bundler",
     "types": ["electron-vite/node"]
   }
 }

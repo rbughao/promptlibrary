@@ -1,4 +1,4 @@
-import type { Session, Prompt, Cluster } from '../../types'
+import type { Session, Prompt } from '../../types'
 
 export interface StoredCluster {
   id: string

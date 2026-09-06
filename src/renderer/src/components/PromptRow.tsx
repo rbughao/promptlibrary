@@ -1,34 +1,29 @@
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
+import { getPersonaLabel } from '@shared/index'
 import type { Prompt } from '@shared/index'
+
+export const CLUSTER_COLORS = [
+  'bg-indigo-900/50 text-indigo-300',
+  'bg-purple-900/50 text-purple-300',
+  'bg-cyan-900/50 text-cyan-300',
+  'bg-emerald-900/50 text-emerald-300',
+  'bg-amber-900/50 text-amber-300',
+  'bg-rose-900/50 text-rose-300',
+  'bg-sky-900/50 text-sky-300',
+  'bg-teal-900/50 text-teal-300',
+]
+
+const FALLBACK_COLOR = 'bg-slate-700 text-slate-300'
 
 interface Props {
   prompt: Prompt
+  /** Assigned by Library from the session's cluster list, so colours are
+   *  stable within a session and reset when a different one is opened. */
+  clusterColor?: string
 }
 
-const CLUSTER_COLORS: Record<number, string> = {
-  0: 'bg-indigo-900/50 text-indigo-300',
-  1: 'bg-purple-900/50 text-purple-300',
-  2: 'bg-cyan-900/50 text-cyan-300',
-  3: 'bg-emerald-900/50 text-emerald-300',
-  4: 'bg-amber-900/50 text-amber-300',
-  5: 'bg-rose-900/50 text-rose-300',
-  6: 'bg-sky-900/50 text-sky-300',
-  7: 'bg-teal-900/50 text-teal-300',
-}
-
-const clusterColorCache = new Map<string, string>()
-let colorIndex = 0
-
-function getClusterColor(cluster: string): string {
-  if (!clusterColorCache.has(cluster)) {
-    clusterColorCache.set(cluster, CLUSTER_COLORS[colorIndex % 8])
-    colorIndex++
-  }
-  return clusterColorCache.get(cluster)!
-}
-
-export default function PromptRow({ prompt }: Props): JSX.Element {
+export default function PromptRow({ prompt, clusterColor }: Props): JSX.Element {
   const { updatePrompt } = useStore()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(prompt.text)
@@ -85,8 +80,6 @@ export default function PromptRow({ prompt }: Props): JSX.Element {
     await window.api.db.updatePrompt(prompt.id, { tags: newTags })
   }
 
-  const clusterColor = getClusterColor(prompt.cluster)
-
   return (
     <tr
       className={`border-b border-slate-800 hover:bg-slate-800/40 transition-colors group ${
@@ -95,7 +88,7 @@ export default function PromptRow({ prompt }: Props): JSX.Element {
     >
       {/* Cluster */}
       <td className="px-3 py-2.5 w-36 shrink-0">
-        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium truncate max-w-full ${clusterColor}`}>
+        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium truncate max-w-full ${clusterColor ?? FALLBACK_COLOR}`}>
           {prompt.cluster}
         </span>
       </td>
@@ -137,7 +130,9 @@ export default function PromptRow({ prompt }: Props): JSX.Element {
       {/* Persona */}
       <td className="px-3 py-2.5 w-28">
         {prompt.persona ? (
-          <span className="text-xs text-slate-400">{prompt.persona}</span>
+          <span className="text-xs text-slate-400" title={prompt.persona}>
+            {getPersonaLabel(prompt.persona, prompt.personaLabel)}
+          </span>
         ) : (
           <span className="text-xs text-slate-700">—</span>
         )}

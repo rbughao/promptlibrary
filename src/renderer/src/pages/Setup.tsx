@@ -11,7 +11,7 @@ export default function Setup(): JSX.Element {
     selectedPersonas, togglePersona, clearPersonas,
     crawling, setCrawling,
     crawlProgress, setCrawlProgress,
-    crawledPages, setCrawledPages,
+    setCrawledPages,
     generating, setGenerating,
     generatingPersona, setGeneratingPersona,
     setPrompts, setClusters, setCurrentSession,
@@ -103,7 +103,7 @@ export default function Setup(): JSX.Element {
 
     // Step 4: Save to DB
     const saveResult = await window.api.db.save(
-      { url: url.trim(), category: effectiveCategory },
+      { url: url.trim(), category: effectiveCategory, pageCount: pages.length },
       clusters,
       allPrompts
     )

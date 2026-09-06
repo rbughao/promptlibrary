@@ -1,15 +1,25 @@
 import type { IpcMain } from 'electron'
-import { saveSession, loadSession, listSessions, deleteSession, updatePromptRecord } from '../db'
+import {
+  saveSession, appendPrompts, loadSession, listSessions, deleteSession, updatePromptRecord,
+} from '../db'
 import type { Cluster } from '../../types'
+
+type NewPrompt = {
+  text: string
+  cluster: string
+  trustWord: string
+  persona?: string
+  personaLabel?: string
+}
 
 export function registerDbHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(
     'db:save',
     (
       _,
-      sessionData: { url: string; category: string },
+      sessionData: { url: string; category: string; pageCount?: number },
       clusters: Cluster[],
-      prompts: Array<{ text: string; cluster: string; trustWord: string; persona?: string }>
+      prompts: NewPrompt[]
     ) => {
       try {
         const result = saveSession(sessionData, clusters, prompts)
@@ -19,6 +29,16 @@ export function registerDbHandlers(ipcMain: IpcMain): void {
       }
     }
   )
+
+  ipcMain.handle('db:appendPrompts', (_, sessionId: string, prompts: NewPrompt[]) => {
+    try {
+      const result = appendPrompts(sessionId, prompts)
+      if (!result.success) return { success: false, error: 'Session not found', added: 0 }
+      return { success: true, added: result.added }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err), added: 0 }
+    }
+  })
 
   ipcMain.handle('db:load', (_, sessionId: string) => {
     return loadSession(sessionId)

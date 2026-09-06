@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
-import PromptRow from '../components/PromptRow'
+import PromptRow, { CLUSTER_COLORS } from '../components/PromptRow'
 import ExportPanel from '../components/ExportPanel'
-import { INDUSTRY_PERSONAS, TRUST_WORDS } from '@shared/index'
+import { ALL_PERSONAS, TRUST_WORDS, getPersonaLabel } from '@shared/index'
 import type { Prompt } from '@shared/index'
 
 export default function Library(): JSX.Element {
   const {
-    prompts, clusters, currentSession,
+    prompts, currentSession, setCurrentSession,
     searchText, setSearchText,
     filterCluster, setFilterCluster,
     filterPersona, setFilterPersona,
     filterTrustWord, setFilterTrustWord,
     showDeleted, setShowDeleted,
     selectedPersonas, setGeneratingPersona,
-    setPrompts, setError,
+    setPrompts, error, setError,
   } = useStore()
 
   const [rerunning, setRerunning] = useState(false)
@@ -24,12 +24,25 @@ export default function Library(): JSX.Element {
     [prompts]
   )
 
-  const allPersonas = useMemo(() => Object.values(INDUSTRY_PERSONAS).flat(), [])
+  // Colours are assigned by position in this session's cluster list, so they
+  // are stable while a library is open and reset when another one is loaded.
+  const clusterColors = useMemo(() => {
+    const map = new Map<string, string>()
+    clusterNames.forEach((name, i) => map.set(name, CLUSTER_COLORS[i % CLUSTER_COLORS.length]))
+    return map
+  }, [clusterNames])
 
+  // Built from the prompts rather than INDUSTRY_PERSONAS so custom personas,
+  // which have no entry there, still appear in the filter.
   const personasInLibrary = useMemo(() => {
-    const ids = new Set(prompts.map((p) => p.persona).filter(Boolean) as string[])
-    return allPersonas.filter((p) => ids.has(p.id))
-  }, [prompts, allPersonas])
+    const seen = new Map<string, string>()
+    for (const p of prompts) {
+      if (p.persona && !seen.has(p.persona)) {
+        seen.set(p.persona, getPersonaLabel(p.persona, p.personaLabel))
+      }
+    }
+    return Array.from(seen, ([id, label]) => ({ id, label }))
+  }, [prompts])
 
   const trustWordsInLibrary = useMemo(() => {
     const words = new Set(prompts.map((p) => p.trustWord))
@@ -60,7 +73,17 @@ export default function Library(): JSX.Element {
     setError(null)
 
     try {
-      const activePersonas = allPersonas.filter((p) => selectedPersonas.includes(p.id))
+      // Skip personas already present — re-running one would duplicate every prompt.
+      const existing = new Set(prompts.map((p) => p.persona).filter(Boolean) as string[])
+      const activePersonas = ALL_PERSONAS.filter(
+        (p) => selectedPersonas.includes(p.id) && !existing.has(p.id)
+      )
+
+      if (activePersonas.length === 0) {
+        setError('Those personas are already in this library.')
+        return
+      }
+
       const basePrompts = prompts
         .filter((p) => !p.persona && !p.deleted)
         .map(({ text, cluster, trustWord }) => ({ text, cluster, trustWord }))
@@ -77,14 +100,21 @@ export default function Library(): JSX.Element {
       }
 
       const newPrompts = result.prompts ?? []
-      if (newPrompts.length > 0) {
-        await window.api.db.save(
-          { url: currentSession.url, category: currentSession.category },
-          clusters,
-          newPrompts
-        )
-        const updated = await window.api.db.load(currentSession.id)
-        if (updated) setPrompts(updated.prompts)
+      if (newPrompts.length === 0) {
+        setError('The model returned no persona prompts — it may have run out of output tokens.')
+        return
+      }
+
+      const appended = await window.api.db.appendPrompts(currentSession.id, newPrompts)
+      if (!appended.success) {
+        setError(appended.error ?? 'Failed to save persona prompts')
+        return
+      }
+
+      const updated = await window.api.db.load(currentSession.id)
+      if (updated) {
+        setCurrentSession(updated)
+        setPrompts(updated.prompts)
       }
     } finally {
       setRerunning(false)
@@ -179,6 +209,19 @@ export default function Library(): JSX.Element {
         )}
       </div>
 
+      {error && (
+        <div className="shrink-0 flex items-start gap-2 px-4 py-2.5 bg-red-900/20 border-b border-red-800/60 text-sm text-red-400">
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="shrink-0 text-red-600 hover:text-red-300 transition-colors leading-none"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 overflow-auto">
         <table className="w-full">
@@ -194,7 +237,11 @@ export default function Library(): JSX.Element {
           </thead>
           <tbody>
             {visiblePrompts.map((prompt) => (
-              <PromptRow key={prompt.id} prompt={prompt} />
+              <PromptRow
+                key={prompt.id}
+                prompt={prompt}
+                clusterColor={clusterColors.get(prompt.cluster)}
+              />
             ))}
           </tbody>
         </table>

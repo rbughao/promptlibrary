@@ -6,6 +6,14 @@ import type {
 
 type CrawlProgressCallback = (progress: CrawlProgress) => void
 
+type NewPrompt = {
+  text: string
+  cluster: string
+  trustWord: string
+  persona?: string
+  personaLabel?: string
+}
+
 const api = {
   crawl: {
     start: (url: string) => ipcRenderer.invoke('crawl:start', url),
@@ -26,10 +34,15 @@ const api = {
   },
   db: {
     save: (
-      sessionData: { url: string; category: string },
+      sessionData: { url: string; category: string; pageCount?: number },
       clusters: Cluster[],
-      prompts: Array<{ text: string; cluster: string; trustWord: string; persona?: string }>
+      prompts: NewPrompt[]
     ) => ipcRenderer.invoke('db:save', sessionData, clusters, prompts),
+    appendPrompts: (
+      sessionId: string,
+      prompts: NewPrompt[]
+    ): Promise<{ success: boolean; added: number; error?: string }> =>
+      ipcRenderer.invoke('db:appendPrompts', sessionId, prompts),
     load: (sessionId: string): Promise<SessionWithPrompts | null> =>
       ipcRenderer.invoke('db:load', sessionId),
     list: (): Promise<Session[]> => ipcRenderer.invoke('db:list'),
@@ -47,7 +60,11 @@ const api = {
     crawlProgress: (cb: CrawlProgressCallback) => {
       const handler = (_: Electron.IpcRendererEvent, progress: CrawlProgress) => cb(progress)
       ipcRenderer.on('crawl:progress', handler)
-      return () => ipcRenderer.removeListener('crawl:progress', handler)
+      // Braces matter: removeListener returns IpcRenderer, but React's cleanup
+      // callback must return void.
+      return () => {
+        ipcRenderer.removeListener('crawl:progress', handler)
+      }
     },
   },
 }
