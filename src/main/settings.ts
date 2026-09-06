@@ -1,7 +1,8 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import type { ProviderConfig } from '../types'
+import { writeFileAtomicSync } from './fsAtomic'
 
 const CONFIG_FILE = 'provider-config.json'
 const KEY_FILE = 'api.key'
@@ -45,12 +46,12 @@ export function saveSettings(config: ProviderConfig): void {
   const keyPath = join(userData, KEY_FILE)
 
   const { apiKey, ...nonSensitive } = config
-  writeFileSync(configPath, JSON.stringify(nonSensitive, null, 2), 'utf-8')
+  writeFileAtomicSync(configPath, JSON.stringify(nonSensitive, null, 2))
 
   if (safeStorage.isEncryptionAvailable()) {
-    writeFileSync(keyPath, safeStorage.encryptString(apiKey))
+    writeFileAtomicSync(keyPath, safeStorage.encryptString(apiKey))
   } else {
-    writeFileSync(keyPath, apiKey, 'utf-8')
+    writeFileAtomicSync(keyPath, apiKey)
   }
 
   current = { ...config }

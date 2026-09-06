@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDb } from './db'
+import { initDb, flushDbSync } from './db'
 import { loadSettings, saveSettings, getProviderConfig } from './settings'
 import { registerCrawlHandlers } from './ipc/crawl'
 import { registerGenerateHandlers } from './ipc/generate'
@@ -77,6 +77,12 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// Prompt edits are written on a short debounce, so anything still pending has
+// to be flushed synchronously before the process goes away.
+app.on('will-quit', () => {
+  flushDbSync()
 })
 
 app.on('window-all-closed', () => {
