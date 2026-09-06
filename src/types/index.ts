@@ -286,6 +286,7 @@ export const TRUST_WORDS = [
   'leading', 'safest', 'most affordable', 'most reputable',
 ]
 
+
 // ── Generation quality (phase 6) ──
 
 /** Result of topping up a single cluster with additional prompts. */
@@ -294,3 +295,42 @@ export interface ClusterGenerateResult {
   /** Non-fatal notes worth showing the user (duplicates or missing trust words). */
   warnings: string[]
 }
+
+// ── Pipeline (phase 5) ──
+
+/** Where the user is in the crawl → review → generate pipeline. */
+export type PipelineStage = 'idle' | 'crawling' | 'crawled' | 'generating'
+
+/** Crawl budget chosen in the UI and passed through to the crawler. */
+export interface CrawlRequestOptions {
+  maxPages?: number
+  maxDepth?: number
+}
+
+export const CRAWL_DEFAULTS = { maxPages: 25, maxDepth: 3 } as const
+
+export const CRAWL_LIMITS = {
+  minPages: 1,
+  maxPages: 100,
+  minDepth: 0,
+  maxDepth: 5,
+} as const
+
+/** The renderer can send anything over IPC, so the budget is clamped in main too. */
+export function clampCrawlOptions(
+  opts?: CrawlRequestOptions
+): { maxPages: number; maxDepth: number } {
+  const clamp = (v: number | undefined, min: number, max: number, fallback: number): number => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return fallback
+    return Math.min(max, Math.max(min, Math.round(v)))
+  }
+  return {
+    maxPages: clamp(
+      opts?.maxPages, CRAWL_LIMITS.minPages, CRAWL_LIMITS.maxPages, CRAWL_DEFAULTS.maxPages
+    ),
+    maxDepth: clamp(
+      opts?.maxDepth, CRAWL_LIMITS.minDepth, CRAWL_LIMITS.maxDepth, CRAWL_DEFAULTS.maxDepth
+    ),
+  }
+}
+

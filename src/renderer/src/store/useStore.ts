@@ -1,7 +1,8 @@
 import { create } from 'zustand'
+import { CRAWL_DEFAULTS } from '@shared/index'
 import type {
   Cluster, Prompt, Session, SessionWithPrompts,
-  CrawlProgress, GenerateProgress, PageContent, ProviderConfig,
+  CrawlProgress, GenerateProgress, PageContent, PipelineStage, ProviderConfig,
 } from '@shared/index'
 
 export type AppPage = 'setup' | 'library' | 'history'
@@ -29,12 +30,23 @@ interface AppState {
   clearPersonas: () => void
 
   // Crawl state
+  /** Which step of crawl → review → generate the user is on. */
+  pipelineStage: PipelineStage
+  setPipelineStage: (stage: PipelineStage) => void
+  crawlMaxPages: number
+  setCrawlMaxPages: (n: number) => void
+  crawlMaxDepth: number
+  setCrawlMaxDepth: (n: number) => void
   crawling: boolean
   setCrawling: (v: boolean) => void
   crawlProgress: CrawlProgress | null
   setCrawlProgress: (p: CrawlProgress | null) => void
   crawledPages: PageContent[]
   setCrawledPages: (pages: PageContent[]) => void
+  /** URLs the user has unticked in the review panel; excluded from generation. */
+  excludedUrls: string[]
+  toggleExcludedUrl: (url: string) => void
+  setExcludedUrls: (urls: string[]) => void
 
   // Generation state
   generating: boolean
@@ -102,12 +114,26 @@ export const useStore = create<AppState>((set) => ({
     })),
   clearPersonas: () => set({ selectedPersonas: [] }),
 
+  pipelineStage: 'idle',
+  setPipelineStage: (pipelineStage) => set({ pipelineStage }),
+  crawlMaxPages: CRAWL_DEFAULTS.maxPages,
+  setCrawlMaxPages: (crawlMaxPages) => set({ crawlMaxPages }),
+  crawlMaxDepth: CRAWL_DEFAULTS.maxDepth,
+  setCrawlMaxDepth: (crawlMaxDepth) => set({ crawlMaxDepth }),
   crawling: false,
   setCrawling: (crawling) => set({ crawling }),
   crawlProgress: null,
   setCrawlProgress: (crawlProgress) => set({ crawlProgress }),
   crawledPages: [],
   setCrawledPages: (crawledPages) => set({ crawledPages }),
+  excludedUrls: [],
+  toggleExcludedUrl: (url) =>
+    set((state) => ({
+      excludedUrls: state.excludedUrls.includes(url)
+        ? state.excludedUrls.filter((u) => u !== url)
+        : [...state.excludedUrls, url],
+    })),
+  setExcludedUrls: (excludedUrls) => set({ excludedUrls }),
 
   generating: false,
   setGenerating: (generating) => set({ generating }),
