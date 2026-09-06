@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import CrawlProgress from '../components/CrawlProgress'
-import { CATEGORIES, INDUSTRY_PERSONAS, PROVIDER_NEEDS_KEY, type PersonaDef } from '@shared/index'
+import CrawlReview from '../components/CrawlReview'
+import {
+  CATEGORIES, CRAWL_LIMITS, INDUSTRY_PERSONAS, PROVIDER_NEEDS_KEY,
+  clampCrawlOptions, type PersonaDef, type RawTerm,
+} from '@shared/index'
 
 export default function Setup(): JSX.Element {
   const {
@@ -9,9 +13,13 @@ export default function Setup(): JSX.Element {
     category, setCategory,
     customCategory, setCustomCategory,
     selectedPersonas, togglePersona, clearPersonas,
+    pipelineStage, setPipelineStage,
+    crawlMaxPages, setCrawlMaxPages,
+    crawlMaxDepth, setCrawlMaxDepth,
     crawling, setCrawling,
-    crawlProgress, setCrawlProgress,
-    setCrawledPages,
+    setCrawlProgress,
+    crawledPages, setCrawledPages,
+    excludedUrls, toggleExcludedUrl, setExcludedUrls,
     generating, setGenerating,
     generatingPersona, setGeneratingPersona,
     setGenerateProgress,
@@ -23,6 +31,8 @@ export default function Setup(): JSX.Element {
   const [customPersonas, setCustomPersonas] = useState<PersonaDef[]>([])
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [customInputValue, setCustomInputValue] = useState('')
+  const [terms, setTerms] = useState<RawTerm[]>([])
+  const [termsLoading, setTermsLoading] = useState(false)
 
   const isCustomCategory = !CATEGORIES.includes(category as typeof CATEGORIES[number])
 
@@ -40,46 +50,90 @@ export default function Setup(): JSX.Element {
     return unsub
   }, [setGenerateProgress])
 
+  // Terms are a preview only — a failure here must not block generation.
+  useEffect(() => {
+    if (pipelineStage !== 'crawled' || crawledPages.length === 0) return
+    let cancelled = false
+    setTermsLoading(true)
+    window.api.generate
+      .terms(crawledPages)
+      .then((res) => {
+        if (!cancelled) setTerms(res.success ? res.terms : [])
+      })
+      .catch(() => {
+        if (!cancelled) setTerms([])
+      })
+      .finally(() => {
+        if (!cancelled) setTermsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pipelineStage, crawledPages])
+
   const effectiveCategory = isCustomCategory ? customCategory || category : category
   const personaList: PersonaDef[] = INDUSTRY_PERSONAS[effectiveCategory] ?? []
   const isRunning = crawling || generating || generatingPersona
+  const inReview = pipelineStage === 'crawled'
+  // The URL and the page budget only shape the crawl, so once pages are in hand
+  // they are locked until the user chooses to re-crawl.
+  const crawlFieldsLocked = isRunning || inReview
 
   const providerReady =
     !PROVIDER_NEEDS_KEY[providerConfig.type] || Boolean(providerConfig.apiKey)
 
-  async function handleStart(): Promise<void> {
+  async function handleCrawl(): Promise<void> {
     if (!url.trim()) return
-    if (!providerReady) {
-      setShowSettings(true)
-      return
-    }
 
     setError(null)
     setWarnings([])
     setCrawlProgress(null)
     setGenerateProgress(null)
     setCrawledPages([])
+    setExcludedUrls([])
+    setTerms([])
+    setPipelineStage('crawling')
     setCrawling(true)
 
-    // Step 1: Crawl
-    const crawlResult = await window.api.crawl.start(url.trim())
+    const result = await window.api.crawl.start(
+      url.trim(),
+      clampCrawlOptions({ maxPages: crawlMaxPages, maxDepth: crawlMaxDepth })
+    )
+    setCrawling(false)
 
-    if (!crawlResult.success) {
-      setCrawling(false)
-      setError(crawlResult.error ?? 'Crawl failed')
+    if (!result.success) {
+      setPipelineStage('idle')
+      setError(result.error ?? 'Crawl failed')
       return
     }
 
-    const pages = crawlResult.pages
-    setCrawledPages(pages)
-    setCrawling(false)
+    setCrawledPages(result.pages)
+    setPipelineStage('crawled')
+  }
 
-    // Step 2: Generate base prompts
+  async function handleGenerate(): Promise<void> {
+    if (!providerReady) {
+      setShowSettings(true)
+      return
+    }
+
+    const pages = crawledPages.filter((p) => !excludedUrls.includes(p.url))
+    if (pages.length === 0) return
+
+    setError(null)
+    setWarnings([])
+    setGenerateProgress(null)
+    setPipelineStage('generating')
     setGenerating(true)
+
+    // Step 1: Generate base prompts
     const genResult = await window.api.generate.prompts(pages, effectiveCategory)
 
     if (!genResult.success) {
       setGenerating(false)
+      // The crawl is still good — go back to review so the user can change
+      // model or settings and generate again without re-crawling.
+      setPipelineStage('crawled')
       setError(genResult.error ?? 'Generation failed')
       return
     }
@@ -87,7 +141,7 @@ export default function Setup(): JSX.Element {
     let allPrompts = genResult.prompts
     const clusters = genResult.clusters
 
-    // Step 3: Apply persona filter if selected
+    // Step 2: Apply persona filter if selected
     if (selectedPersonas.length > 0) {
       setGenerating(false)
       setGeneratingPersona(true)
@@ -120,7 +174,7 @@ export default function Setup(): JSX.Element {
       setGenerating(false)
     }
 
-    // Step 4: Save to DB
+    // Step 3: Save to DB
     const saveResult = await window.api.db.save(
       { url: url.trim(), category: effectiveCategory, pageCount: pages.length },
       clusters,
@@ -128,18 +182,33 @@ export default function Setup(): JSX.Element {
     )
 
     if (!saveResult.success) {
+      setPipelineStage('crawled')
       setError(saveResult.error ?? 'Failed to save')
       return
     }
 
-    // Step 5: Load full session and go to Library
+    // Step 4: Load full session and go to Library
     const session = await window.api.db.load(saveResult.sessionId!)
-    if (session) {
-      setCurrentSession(session)
-      setClusters(session.clusters)
-      setPrompts(session.prompts)
-      setPage('library')
+    if (!session) {
+      setPipelineStage('crawled')
+      setError('The library was saved but could not be loaded. Open it from History.')
+      return
     }
+
+    setCurrentSession(session)
+    setClusters(session.clusters)
+    setPrompts(session.prompts)
+    setPipelineStage('idle')
+    setPage('library')
+  }
+
+  function handleRecrawl(): void {
+    setCrawledPages([])
+    setExcludedUrls([])
+    setTerms([])
+    setCrawlProgress(null)
+    setError(null)
+    setPipelineStage('idle')
   }
 
   function handleAddCustomPersona(): void {
@@ -157,9 +226,13 @@ export default function Setup(): JSX.Element {
     await window.api.crawl.cancel(url.trim())
     setCrawling(false)
     setCrawlProgress(null)
+    setPipelineStage('idle')
   }
 
-  const canStart = url.trim() && !isRunning && (isCustomCategory ? customCategory.trim() : true)
+  const canCrawl = url.trim() && !isRunning && (isCustomCategory ? customCategory.trim() : true)
+  const canGenerate = Boolean(
+    !isRunning && providerReady && (isCustomCategory ? customCategory.trim() : true)
+  )
 
   return (
     <div className="h-full overflow-y-auto">
@@ -167,8 +240,8 @@ export default function Setup(): JSX.Element {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-100 mb-1.5">New Prompt Library</h1>
           <p className="text-slate-500 text-sm">
-            Enter a website URL and industry category. The app crawls the site, extracts topics,
-            and generates 50+ AI-ready customer questions.
+            Enter a website URL and industry category. The app crawls the site first, so you can
+            review what was found before spending time on generation.
           </p>
         </div>
 
@@ -180,9 +253,55 @@ export default function Setup(): JSX.Element {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.example.com"
-            disabled={isRunning}
+            disabled={crawlFieldsLocked}
             className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 text-sm"
           />
+        </div>
+
+        {/* Crawl budget */}
+        <div className="mb-5 flex gap-3">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">Max pages</label>
+            <input
+              type="number"
+              min={CRAWL_LIMITS.minPages}
+              max={CRAWL_LIMITS.maxPages}
+              value={crawlMaxPages}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10)
+                if (!Number.isNaN(n)) setCrawlMaxPages(n)
+              }}
+              onBlur={() =>
+                setCrawlMaxPages(clampCrawlOptions({ maxPages: crawlMaxPages }).maxPages)
+              }
+              disabled={crawlFieldsLocked}
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50 text-sm"
+            />
+            <p className="text-xs text-slate-600 mt-1">
+              {CRAWL_LIMITS.minPages}–{CRAWL_LIMITS.maxPages}
+            </p>
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-slate-400 mb-1.5">Max depth</label>
+            <input
+              type="number"
+              min={CRAWL_LIMITS.minDepth}
+              max={CRAWL_LIMITS.maxDepth}
+              value={crawlMaxDepth}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10)
+                if (!Number.isNaN(n)) setCrawlMaxDepth(n)
+              }}
+              onBlur={() =>
+                setCrawlMaxDepth(clampCrawlOptions({ maxDepth: crawlMaxDepth }).maxDepth)
+              }
+              disabled={crawlFieldsLocked}
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50 text-sm"
+            />
+            <p className="text-xs text-slate-600 mt-1">
+              Links to follow from the start page ({CRAWL_LIMITS.minDepth}–{CRAWL_LIMITS.maxDepth})
+            </p>
+          </div>
         </div>
 
         {/* Category */}
@@ -334,22 +453,42 @@ export default function Setup(): JSX.Element {
         {error && (
           <div className="mb-5 p-3 bg-red-900/20 border border-red-800 rounded-lg text-sm text-red-400">
             {error}
+            {inReview && crawledPages.length > 0 && (
+              <span className="block mt-1 text-red-300/80">
+                The crawl has been kept. Adjust your settings and generate again.
+              </span>
+            )}
           </div>
         )}
 
-        {(crawling || crawlProgress || generating || generatingPersona) && (
+        {(crawling || generating || generatingPersona) && (
           <div className="mb-5">
             <CrawlProgress onCancel={handleCancel} />
           </div>
         )}
 
-        {!isRunning && (
+        {inReview && (
+          <CrawlReview
+            url={url.trim()}
+            pages={crawledPages}
+            excluded={excludedUrls}
+            terms={terms}
+            termsLoading={termsLoading}
+            canGenerate={canGenerate}
+            onToggle={toggleExcludedUrl}
+            onIncludeAll={() => setExcludedUrls([])}
+            onGenerate={handleGenerate}
+            onRecrawl={handleRecrawl}
+          />
+        )}
+
+        {!isRunning && !inReview && (
           <button
-            onClick={handleStart}
-            disabled={!canStart || !providerReady}
+            onClick={handleCrawl}
+            disabled={!canCrawl}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors text-sm"
           >
-            Analyze & Generate Prompt Library
+            Crawl Website
           </button>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { CRAWL_DEFAULTS } from '@shared/index'
 import { useStore } from '../store/useStore'
 
 interface Props {
@@ -9,7 +10,7 @@ export default function CrawlProgress({ onCancel }: Props): JSX.Element {
     useStore()
 
   const pagesVisited = crawlProgress?.pagesVisited ?? 0
-  const maxPages = crawlProgress?.maxPages ?? 25
+  const maxPages = crawlProgress?.maxPages ?? CRAWL_DEFAULTS.maxPages
   const progress = Math.min((pagesVisited / maxPages) * 100, 100)
 
   const isError = crawlProgress?.status === 'error'

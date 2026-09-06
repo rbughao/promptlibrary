@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   PageContent, Cluster, Session, SessionWithPrompts,
   PersonaDef, CrawlProgress, GenerateProgress, ProviderConfig, ProviderType,
+  CrawlRequestOptions, RawTerm,
 } from '../types'
 
 type CrawlProgressCallback = (progress: CrawlProgress) => void
@@ -16,7 +17,8 @@ type NewPrompt = {
 
 const api = {
   crawl: {
-    start: (url: string) => ipcRenderer.invoke('crawl:start', url),
+    start: (url: string, opts?: CrawlRequestOptions) =>
+      ipcRenderer.invoke('crawl:start', url, opts),
     cancel: (url: string) => ipcRenderer.invoke('crawl:cancel', url),
   },
   generate: {
@@ -36,6 +38,10 @@ const api = {
       ipcRenderer.invoke('generate:listModels', cfg),
     testConnection: (config: ProviderConfig) =>
       ipcRenderer.invoke('generate:testConnection', config),
+    terms: (
+      pages: PageContent[]
+    ): Promise<{ success: boolean; terms: RawTerm[]; error?: string }> =>
+      ipcRenderer.invoke('nlp:terms', pages),
   },
   db: {
     save: (

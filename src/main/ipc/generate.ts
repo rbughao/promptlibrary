@@ -1,5 +1,6 @@
 import type { IpcMain, BrowserWindow } from 'electron'
 import { generatePrompts, applyPersonaFilter, listModels, testConnection } from '../ai/generator'
+import { extractRawTerms } from '../nlp/extractor'
 import { getProviderConfig } from '../settings'
 import type { PageContent, PersonaDef, ProviderConfig, ProviderType } from '../../types'
 
@@ -84,6 +85,20 @@ export function registerGenerateHandlers(
         success: false,
         latencyMs: 0,
         model: config.model,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  })
+
+  // Local NLP only — lets the review panel show what signal was found before
+  // the user spends LLM time on generation.
+  ipcMain.handle('nlp:terms', async (_, pages: PageContent[]) => {
+    try {
+      return { success: true, terms: extractRawTerms(pages ?? []) }
+    } catch (err) {
+      return {
+        success: false,
+        terms: [],
         error: err instanceof Error ? err.message : String(err),
       }
     }

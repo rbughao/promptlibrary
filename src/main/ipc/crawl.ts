@@ -1,9 +1,7 @@
 import type { IpcMain, BrowserWindow } from 'electron'
 import { crawlSite } from '../crawler'
-import type { PageContent } from '../../types'
-
-const MAX_DEPTH = 3
-const MAX_PAGES = 25
+import { clampCrawlOptions } from '../../types'
+import type { PageContent, CrawlRequestOptions } from '../../types'
 
 // The UI runs one crawl at a time. Keying this by URL meant an edit to the URL
 // field mid-crawl made Cancel unable to find the controller.
@@ -13,18 +11,20 @@ export function registerCrawlHandlers(
   ipcMain: IpcMain,
   getWindow: () => BrowserWindow | null
 ): void {
-  ipcMain.handle('crawl:start', async (_, url: string) => {
+  ipcMain.handle('crawl:start', async (_, url: string, opts?: CrawlRequestOptions) => {
     active?.abort()
     const controller = new AbortController()
     active = controller
 
+    const { maxPages, maxDepth } = clampCrawlOptions(opts)
+
     try {
       const pages: PageContent[] = await crawlSite({
         url,
-        maxDepth: MAX_DEPTH,
-        maxPages: MAX_PAGES,
+        maxDepth,
+        maxPages,
         signal: controller.signal,
-        onProgress: ({ pagesVisited, currentUrl, maxPages }) => {
+        onProgress: ({ pagesVisited, currentUrl }) => {
           getWindow()?.webContents.send('crawl:progress', {
             pagesVisited,
             currentUrl,
@@ -37,7 +37,7 @@ export function registerCrawlHandlers(
       getWindow()?.webContents.send('crawl:progress', {
         pagesVisited: pages.length,
         currentUrl: '',
-        maxPages: MAX_PAGES,
+        maxPages,
         status: 'complete',
       })
 
@@ -56,7 +56,7 @@ export function registerCrawlHandlers(
       getWindow()?.webContents.send('crawl:progress', {
         pagesVisited: 0,
         currentUrl: '',
-        maxPages: MAX_PAGES,
+        maxPages,
         status: 'error',
         error: message,
       })
